@@ -1,12 +1,11 @@
 import customtkinter as ctk
 import speech_recognition as sr
-from openai import OpenAI
 import threading
 import pyaudio
 import wave
 import os
-
-# Set your OpenAI API key as an environment variable
+from main import ToolHandler, ClientManager
+import pyttsx3
 
 class VoiceChatApp(ctk.CTk):
     def __init__(self):
@@ -31,11 +30,22 @@ class VoiceChatApp(ctk.CTk):
         self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="Voice Chat AI", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
 
+        # Session selection
+        self.session_label = ctk.CTkLabel(self.sidebar_frame, text="Select Session:", anchor="w")
+        self.session_label.grid(row=1, column=0, padx=20, pady=(10, 0))
+        
+        self.session_menu = ctk.CTkOptionMenu(self.sidebar_frame, values=[], command=self.change_session)
+        self.session_menu.grid(row=2, column=0, padx=20, pady=(10, 10))
+
+        self.new_session_button = ctk.CTkButton(self.sidebar_frame, text="New Session", command=self.new_session)
+        self.new_session_button.grid(row=3, column=0, padx=20, pady=(10, 10))
+
         self.mode_label = ctk.CTkLabel(self.sidebar_frame, text="Appearance Mode:", anchor="w")
-        self.mode_label.grid(row=5, column=0, padx=20, pady=(10, 0))
-        self.mode_menu = ctk.CTkOptionMenu(self.sidebar_frame, values=["Light", "Dark", "System"],
+        self.mode_label.grid(row=4, column=0, padx=20, pady=(10, 0))
+        
+        self.mode_menu = ctk.CTkOptionMenu(self.sidebar_frame, values=["System", "Light", "Dark"],
                                                        command=self.change_appearance_mode)
-        self.mode_menu.grid(row=6, column=0, padx=20, pady=(10, 10))
+        self.mode_menu.grid(row=5, column=0, padx=20, pady=(10, 10))
 
         # Create main frame
         self.main_frame = ctk.CTkFrame(self, corner_radius=0)
@@ -50,35 +60,59 @@ class VoiceChatApp(ctk.CTk):
         # Buttons frame
         self.button_frame = ctk.CTkFrame(self.main_frame)
         self.button_frame.grid(row=2, column=0, padx=(20, 20), pady=(0, 20), sticky="ew")
-        self.button_frame.grid_columnconfigure((0, 1), weight=1)
-
+        
         self.start_button = ctk.CTkButton(self.button_frame, text="Start Recording", command=self.start_recording)
-        self.start_button.grid(row=0, column=0, padx=(0, 10), pady=10, sticky="ew")
+        self.start_button.grid(row=0, column=0, padx=(0, 10), pady=10)
 
-        self.stop_button = ctk.CTkButton(self.button_frame, text="Stop Recording", command=self.stop_recording, state="disabled")
-        self.stop_button.grid(row=0, column=1, padx=(10, 0), pady=10, sticky="ew")
+        self.stop_button = ctk.CTkButton(self.button_frame, text="Stop Recording", command=self.stop_recording,
+                                          state="disabled")
+        self.stop_button.grid(row=0, column=1, padx=(10, 0), pady=10)
 
-        # Initialize speech recognition and OpenAI client
+        # Initialize speech recognition and audio components
         self.recognizer = sr.Recognizer()
-        self.client = OpenAI(api_key="lm-studio", base_url="http://localhost:1234/v1")
         self.is_recording = False
         self.audio = pyaudio.PyAudio()
-        self.frames = []
-        self.stream = None
-        self.is_recording = False
+        self.speech_engine = pyttsx3.init()
         
-        self.messages = [{"role": "system", "content": "You are a helpful assistant whose job is to guide the user in ideating a project or code approach. do not supply the answer but ask questions to guide the user. Keep the conversation going until reaching a concrete implementation plan. do not ask all questions at once, solve iteratively as if its a natural conversation. Keep the output brief. Limit the response to 400 words."}]
-
+        # Initialize ToolHandler and session management
+        self.tool_handler = ToolHandler()
+        
+        # Dictionary to hold chat sessions
+        self.sessions = {}
+        self.new_session()
+        
+    def new_session(self):
+        session_name = f"Session {len(self.sessions) + 1}"
+        if session_name not in self.sessions:
+            self.sessions[session_name] = []
+            
+            # Get current values and add the new session
+            current_values = self.session_menu.cget("values")
+            new_values = list(current_values) + [session_name]
+            
+            # Update the option menu with new values
+            self.session_menu.configure(values=new_values)
+            
+            # Set the newly created session as current
+            self.session_menu.set(session_name)
+        
+    def change_session(self, session_name):
+        if session_name in self.sessions:
+            # Load the selected session's chat history into the display
+            chat_history = "\n".join(self.sessions[session_name])
+            self.chat_display.delete("1.0", ctk.END)  # Clear current display
+            if chat_history:
+                self.chat_display.insert(ctk.END, chat_history)
 
     def change_appearance_mode(self, new_appearance_mode: str):
         ctk.set_appearance_mode(new_appearance_mode)
-
+    
     def start_recording(self):
         self.is_recording = True
         self.frames = []
         self.start_button.configure(state=ctk.DISABLED)
         self.stop_button.configure(state=ctk.NORMAL)
-        self.chat_display.insert(ctk.END, "Recording started...\n")
+        self.chat_display.insert(ctk.END, "\nRecording started...\n")
         
         self.stream = self.audio.open(format=pyaudio.paInt16, channels=1, rate=44100, input=True, frames_per_buffer=1024)
         threading.Thread(target=self.record_audio).start()
@@ -88,13 +122,11 @@ class VoiceChatApp(ctk.CTk):
             data = self.stream.read(1024)
             self.frames.append(data)
 
-        
-
     def stop_recording(self):
         self.is_recording = False
         self.start_button.configure(state=ctk.NORMAL)
         self.stop_button.configure(state=ctk.DISABLED)
-        self.chat_display.insert(ctk.END, "Recording stopped.\n")
+        self.chat_display.insert(ctk.END, "\nRecording stopped.\n")
         
         if self.stream:
             self.stream.stop_stream()
@@ -114,35 +146,36 @@ class VoiceChatApp(ctk.CTk):
             audio = self.recognizer.record(source)
         try:
             text = self.recognizer.recognize_google(audio)
-            self.chat_display.insert(ctk.END, f"You: {text}\n")
-            
-        except sr.UnknownValueError:
-            self.chat_display.insert(ctk.END, "Sorry, I didn't catch that.\n")
-        except sr.RequestError:
-            self.chat_display.insert(ctk.END, "Sorry, there was an error processing your request.\n")
-
-        if text:
+            self.chat_display.insert(ctk.END, f"\nYou: {text}\n")
             self.process_input(text)
-            
+        except sr.UnknownValueError:
+            self.chat_display.insert(ctk.END, "\nSorry, I didn't catch that.\n")
+        except sr.RequestError:
+            self.chat_display.insert(ctk.END, "\nSorry, there was an error processing your request.\n")
+
     def process_input(self, text):
-        self.chat_display.insert("end", "AI: ")
+        self.chat_display.insert("end", "\nAI: ")
         threading.Thread(target=self.stream_response, args=(text,)).start()
 
     def stream_response(self, text):
-        self.messages.append({"role": "user", "content": text})
-        stream = self.client.chat.completions.create(
-            model="llama-3.2-3b-qnn",
-            messages=self.messages,
-            stream=True
-        )
-
-        for chunk in stream:
-            if chunk.choices[0].delta.content is not None:
-                self.chat_display.insert(ctk.END, chunk.choices[0].delta.content)
+        history = "".join(self.sessions[self.session_menu.get()])
+        print(history)
+        tool, response = self.tool_handler.tool_selection(text, history)
+        self.chat_display.insert(ctk.END, f"Using {tool} tool:")
+        full_response = ""
+        for chunk in response:
+            if chunk is not None:
+                full_response += chunk
+                self.chat_display.insert(ctk.END, chunk)
                 self.chat_display.see(ctk.END)
-
-        self.chat_display.insert(ctk.END, "\n")
+        
+        # Speak the full response
+        self.speech_engine.say(full_response)
+        self.speech_engine.runAndWait()
+        
         self.chat_display.see(ctk.END)
+        self.sessions[self.session_menu.get()].append((f"prompt:{text}, response:{full_response}"))
+
 
 if __name__ == "__main__":
     app = VoiceChatApp()

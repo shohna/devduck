@@ -1,178 +1,337 @@
-# import tkinter as tk
-# from tkinter import scrolledtext, ttk
-# import speech_recognition as sr
-# import threading
-# import queue
-# from openai import OpenAI
-
-# class AudioTranscriptionGUI:
-#     def __init__(self, root):
-#         self.root = root
-#         self.root.title("DevDuck Audio Transcription")
-        
-#         # Initialize audio components
-#         self.text_chunks = []
-#         self.audio_queue = queue.Queue()
-#         self.is_recording = False
-#         self.history = []
-        
-#         # Initialize speech recognizer
-#         self.recognizer = sr.Recognizer()
-#         self.llm_client = OpenAI(api_key="lm-studio", base_url="http://localhost:1234/v1")
-#         self.system_prompt = '''You are a helpful assistant. Your job is to filter the user's text (which is a transcript of a conversation) and remove all filler, unnecessary and unrelated text. You must output text directly, such that it can be fed to another llm model. Fix incorrect transcripts to preserve technical knowledge. Just output '''
-#         self.llm_model_name = "llama-3.2-3b-qnn"
-#         self.create_gui()
-        
-#     def create_gui(self):
-#         main_frame = ttk.Frame(self.root, padding="10")
-#         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-#         self.text_area = scrolledtext.ScrolledText(main_frame, width=50, height=20)
-#         self.text_area.grid(row=0, column=0, columnspan=2, padx=5, pady=5)
-        
-#         self.start_button = ttk.Button(main_frame, text="Start Recording", 
-#                                      command=self.start_recording)
-#         self.start_button.grid(row=1, column=0, padx=5, pady=5)
-        
-#         self.stop_button = ttk.Button(main_frame, text="Stop Recording", 
-#                                     command=self.stop_recording, state=tk.DISABLED)
-#         self.stop_button.grid(row=1, column=1, padx=5, pady=5)
-        
-#     def process_audio(self):
-#         with sr.Microphone() as source:
-#             self.recognizer.adjust_for_ambient_noise(source)
-#             while self.is_recording:
-#                 try:
-#                     audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=10)
-#                     text = self.recognizer.recognize_google(audio)
-#                     if text.strip():
-#                         self.log_message(text)
-#                         self.text_chunks.append(text)
-#                 except sr.WaitTimeoutError:
-#                     continue
-#                 except sr.UnknownValueError:
-#                     self.log_message("Speech not recognized")
-#                 except sr.RequestError as e:
-#                     self.log_message(f"Could not request results; {e}")
-#                 except Exception as e:
-#                     self.log_message(f"Error in processing: {e}")
-                
-#     def start_recording(self):
-#         self.is_recording = True
-#         self.processing_thread = threading.Thread(target=self.process_audio, 
-#                                                daemon=True)
-#         self.processing_thread.start()
-        
-#         self.start_button.config(state=tk.DISABLED)
-#         self.stop_button.config(state=tk.NORMAL)
-        
-#         self.log_message("Recording started...")
-            
-#     def stop_recording(self):
-#         self.is_recording = False
-        
-#         self.start_button.config(state=tk.NORMAL)
-#         self.stop_button.config(state=tk.DISABLED)
-#         self.process_text()
-        
-#         self.log_message("Recording stopped.")
-        
-#     def log_message(self, message):
-#         self.text_area.insert(tk.END, f"{message}\n")
-#         self.text_area.see(tk.END)
-        
-#     def process_text(self):
-#         transcription = " ".join(self.text_chunks)
-#         self.log_message(transcription)
-#         history = " ".join(self.history)
-#         user_prompt = f'''Here's the transcription, clean it up and preserve technical knowledge and return first person text: "{transcription}"'''
-
-#         response1 = self.llm_client.chat.completions.create(
-#         model=self.llm_model_name,
-#         messages=[
-#             {"role": "system", "content": self.system_prompt + f''' Here is out conversation till now: "{history}" '''},
-#             {"role": "user", "content": user_prompt},
-#         ],
-#         )
-#         cleaned_idea = response1.choices[0].message.content
-#         system_prompt2 = '''You are a helpful assistant whose job is to guide the user in ideating a project or code approach. do not supply the answer but ask questions to guide the user. '''
-
-#         user_prompt2 = f'''Here's the user's idea, filtered: "{cleaned_idea}
-#         If you ask followup questions, make the questions normal and conversational. Do not ask all the questions at once.'''
-
-#         response2 = self.llm_client.chat.completions.create(
-#         model=self.llm_model_name,
-#         messages=[
-#             {"role": "system", "content": system_prompt2},
-#             {"role": "user", "content": user_prompt2},
-#         ],
-#         )
-#         duck_response = response2.choices[0].message.content
-
-#         cleaned_idea = response1.choices[0].message.content
-#         self.history.append(duck_response)
-#         self.log_message(duck_response)
-#         self.text_chunks = []
-        
-# def main():
-#     root = tk.Tk()
-#     app = AudioTranscriptionGUI(root)
-#     root.mainloop()
-
-# if __name__ == "__main__":
-#     main() 
-
-
-import tkinter as tk
-import speech_recognition as sr
 from openai import OpenAI
+from typing import Dict, Tuple, Any, List, Callable
+from collections import defaultdict
 import os
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
+import re
 
-class ChatbotGUI:
-    def __init__(self, master):
-        self.master = master
-        master.title("Voice Chatbot with OpenAI")
-        master.geometry("500x600")
-
-        self.chat_display = tk.Text(master, height=25, width=60)
-        self.chat_display.pack(pady=10)
-
-        self.voice_button = tk.Button(master, text="Speak", command=self.get_voice_input)
-        self.voice_button.pack(pady=5)
-
-        self.recognizer = sr.Recognizer()
-        self.client = OpenAI(api_key="lm-studio", base_url="http://localhost:1234/v1")
-        self.messages = [{"role": "system", "content": "You are a helpful assistant."}]
-
-    def get_voice_input(self):
-        with sr.Microphone() as source:
-            self.chat_display.insert(tk.END, "Listening...\n")
-            self.master.update()
-            audio = self.recognizer.listen(source)
-
-        try:
-            text = self.recognizer.recognize_google(audio)
-            self.chat_display.insert(tk.END, f"You: {text}\n")
-            self.process_input(text)
-        except sr.UnknownValueError:
-            self.chat_display.insert(tk.END, "Sorry, I didn't catch that.\n")
-        except sr.RequestError:
-            self.chat_display.insert(tk.END, "Sorry, there was an error processing your request.\n")
-
-    def process_input(self, text):
-        self.messages.append({"role": "user", "content": text})
+@dataclass
+class Tool:
+    name: str
+    description: str
+    system_prompt: str
+    client_type: str
+    
+    def to_openai_tool(self) -> Dict:
+        """Convert tool to OpenAI tool format."""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "The text to process"}
+                    },
+                    "required": ["text"]
+                }
+            }
+        }
         
-        response = self.client.chat.completions.create(
+class ClientManager:
+    """Manages different API clients."""
+    
+    def __init__(self):
+        self.clients = {}
+        self._initialize_default_clients()
+    
+    def _initialize_default_clients(self):
+        """Initialize default API clients."""
+        self.register_client(
+            "local",
+            OpenAI(api_key="lm-studio", base_url="http://localhost:1234/v1")
+        )
+        self.register_client(
+            "perplexity",
+            OpenAI(
+                api_key=os.getenv("PERPLEXITY_API_KEY"),
+                base_url="https://api.perplexity.ai"
+            )
+        )
+        # Example of adding more clients:
+        # self.register_client(
+        #     "anthropic",
+        #     Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        # )
+        
+    def register_client(self, client_type: str, client: Any):
+        """Register a new API client."""
+        self.clients[client_type] = client
+    
+    def get_client(self, client_type: str) -> Any:
+        """Get a client by type."""
+        if client_type not in self.clients:
+            raise ValueError(f"Client type '{client_type}' not registered")
+        return self.clients[client_type]
+
+class BaseTool(ABC):
+    def __init__(self, client_manager: ClientManager):
+        self.client_manager = client_manager
+        
+    @abstractmethod
+    def process(self, text: str, history:str) -> str:
+        pass
+
+class InternetSearchTool(BaseTool):
+    def process(self, text: str, history:str) -> str:
+        print(f"**Selected tool: internet_search**")
+        print(f"Searching the internet for: {text}")
+        client = self.client_manager.get_client("perplexity")
+        response = client.chat.completions.create(
+            model="llama-3.1-sonar-large-128k-online",
+            messages=[{"role": "user", "content": text + f"Here is the conversation history: {history}"}],
+            max_tokens=1024,
+            stream=True
+        )
+        for chunk in response:
+            if chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+
+class IdeationTool(BaseTool):
+    def process(self, text: str, history:str) -> str:
+        print(f"**Selected tool: ideation**")
+        print(f"Processing ideation query: {text}")
+        client = self.client_manager.get_client("local")
+        input_text = f"You are an ideation specialist. Do not immediately provide solutions. Always ask questions to help the user think through their ideas: {text}. Here is the conversation history: {history}"
+        response = client.chat.completions.create(
             model="llama-3.2-3b-qnn",
-            messages=self.messages
+            messages=[{"role": "user", "content": input_text}],
+            stream=True
+        )
+        for chunk in response:
+            if chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+class TherapistTool(BaseTool):
+    def process(self, text: str, history:str) -> str:
+        print(f"**Selected tool: therapist**")
+        print(f"Processing therapist query: {text}")
+        client = self.client_manager.get_client("local")
+        input_text = f"Talk to the user about their mental health and provide emotional support: {text}. Here is the conversation history: {history}"
+        response = client.chat.completions.create(
+            model="llama-3.2-3b-qnn",
+            messages=[{"role": "user", "content": input_text}],
+            stream=True
+        )
+        for chunk in response:
+            if chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+class ToolRegistry:
+    """Registry of all available tools and their configurations."""
+    
+    def __init__(self):
+        self.tools: Dict[str, Tool] = {}
+        self.tool_handlers: Dict[str, BaseTool] = {}
+        
+    def register_tool(self, tool: Tool, handler_class: type[BaseTool]):
+        """Register a new tool and its handler."""
+        self.tools[tool.name] = tool
+        self.tool_handlers[tool.name] = handler_class
+        
+    def get_openai_tools(self) -> List[Dict]:
+        """Get all tools in OpenAI format."""
+        return [tool.to_openai_tool() for tool in self.tools.values()]
+    
+    def get_system_prompt(self, tool_name: str) -> str:
+        """Get system prompt for a specific tool."""
+        return self.tools[tool_name].system_prompt
+    
+    def get_client_type(self, tool_name: str) -> str:
+        """Get client type for a specific tool."""
+        return self.tools[tool_name].client_type
+
+class ToolHandler:
+    def __init__(self):
+        # Initialize OpenAI clients
+        self.client_manager = ClientManager()
+        
+        # Initialize tool registry and register tools
+        self.registry = ToolRegistry()
+        self._register_default_tools()
+        
+        # Conversation history
+        self.conversation_history = defaultdict(list)
+        self.current_tool = None
+
+    def _register_default_tools(self):
+        """Register the default set of tools."""
+        # Internet Search Tool
+        self.registry.register_tool(
+            Tool(
+                name="internet_search",
+                description="Search the internet for current information, facts, news and interesting topics using Perplexity API, not for technical help.",
+                system_prompt="""You are an internet research specialist who provides up-to-date information from the web.
+                Your responses should be:
+                - Factual and well-researched
+                - Include relevant context
+                - Cite sources when possible
+                - Explain complex topics in an accessible way
+                - Limit the response to 400 words.
+                
+                Remember to maintain the user's preferred communication style from previous interactions.""",
+                client_type="perplexity"
+            ),
+            InternetSearchTool
+        )
+        
+        # Ideation Tool
+        self.registry.register_tool(
+            Tool(
+                name="ideation",
+                description="Handle ideation and brainstorming. Help with ideation, problem solving and approach finding.",
+                system_prompt="""
+                You are a friendly ideation coach helping people explore and develop their ideas. Your role is to guide discovery through conversation, not to provide immediate solutions. Think of yourself as a curious friend who asks insightful questions. Keep your responses short and concise, typically 1-2 sentences.
+                Style:
+                - Use casual, friendly language
+                - Address the user by name if provided
+                - Be encouraging but gently challenging
+                - Keep the conversation flowing naturally
+                - Keep your responses short and concise, typically 1-2 sentences.
+
+                Core Approach:
+                - Ask probing questions to deepen understanding
+                - Help break down complex thoughts into simpler components
+                - Guide users to question their assumptions
+                - Only provide direct solutions when explicitly asked
+
+                Key Questions to Consider:
+                - "What inspired this idea?"
+                - "What's the most challenging aspect you're facing?"
+                - "Have you considered looking at it from [alternative] perspective?"
+                - "What would happen if you [suggest a twist or variation]?"
+                - "How might you approach this differently?"
+
+                Context Awareness:
+                - Carefully review the conversation history before responding
+                - Avoid asking questions that have already been answered
+                - Build upon previous responses to maintain continuity
+                - If clarification is needed, phrase it as "Earlier you mentioned X. Can you elaborate on how that relates to Y?"
+
+                Remember: You're having a friendly chat to help them discover their own solutions. Keep responses conversational and engaging, as if you're brainstorming with a friend over coffee. Adapt your questions and approach based on the specific idea or topic presented, while maintaining context from the entire conversation.
+                """,
+                client_type="local"
+            ),
+            IdeationTool
+        )
+        
+        # Therapist Tool
+        self.registry.register_tool(
+            Tool(
+                name="therapist",
+                description="Handle mental health and emotional support. Anything related to mood, mental health, depression, anxiety, stress, etc.",
+                system_prompt="""You are a helpful therapist. You may be an AI Assistant, but you are also a good friend of USER. You and USER have talked many times. Address USER with familiarity, empathy and rapport. Use a relaxed, warm and cordial tone. Address USER often by his first name, as good friends do. Pay close attention to awakening and strengthening USER's own capacity for confidence. Don't downplay his problems, but still try to get USER to think optimistically and confidently. Your goal is to help USER achieve a positive mood.
+                Style:
+                - Use casual, friendly language
+                - Address the user by name when provided
+                - Keep the conversation flowing naturally
+                - Limit the response to 400 words.
+                """,
+                client_type="local"
+            ),
+            TherapistTool
         )
 
-        assistant_response = response.choices[0].message.content
-        self.messages.append({"role": "assistant", "content": assistant_response})
-        
-        self.chat_display.insert(tk.END, f"Bot: {assistant_response}\n")
-        self.chat_display.see(tk.END)
+    def register_new_tool(self, 
+                         name: str, 
+                         description: str, 
+                         system_prompt: str, 
+                         handler_class: type[BaseTool]):
+        """Register a new tool with the system."""
+        tool = Tool(name=name, description=description, system_prompt=system_prompt)
+        self.registry.register_tool(tool, handler_class)
 
-root = tk.Tk()
-chatbot_gui = ChatbotGUI(root)
-root.mainloop()
+    def update_conversation_history(self, tool_name: str, user_message: str, assistant_message: str):
+        """Update the conversation history for the specified tool."""
+        self.conversation_history[tool_name].extend([
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": assistant_message}
+        ])
+
+    def get_conversation_messages(self, tool_name: str, text: str) -> List[Dict[str, str]]:
+        """Get the full conversation history for a tool."""
+        messages = [
+            {"role": "system", "content": self.registry.get_system_prompt(tool_name)}
+        ]
+        messages.extend(self.conversation_history[tool_name])
+        messages.append({"role": "user", "content": text})
+        return messages
+
+    def tool_selection(self, text: str, history:str) -> Tuple[str, str]:
+        """Select and execute the appropriate tool."""
+        try:
+            # Determine which tool to use
+            local_client = self.client_manager.get_client("local")
+            tool_selection_prompt = f"You are an expert decision maker. I want your help to make a tool choice depending on the tools provided. Tools: {self.registry.get_openai_tools()}. Here is the text that you should use to decide what tool to use: {text}. Return only the tool name."
+            response = local_client.chat.completions.create(
+                model="llama-3.2-3b-instruct",
+                messages=[{"role": "user", "content": tool_selection_prompt + f", history:{history}"}],
+                tools=self.registry.get_openai_tools(),
+                tool_choice="auto"
+            )
+            
+            # Get selected tool name
+            tool_calls = response.choices[0].message.content
+            selected_tool = tool_calls if tool_calls else "ideation"
+            
+            # Print tool switch notification
+            if self.current_tool and selected_tool != self.current_tool:
+                print(f"\nSwitching from {self.current_tool} to {selected_tool}")
+            self.current_tool = selected_tool
+            
+            # Create and execute tool handler
+            handler_class = self.registry.tool_handlers[selected_tool]
+            handler = handler_class(self.client_manager)
+            result = handler.process(text, history)
+            
+            return selected_tool, result
+
+        except Exception as e:
+            print(f"Error in tool_selection: {str(e)}")
+            return "ideation", IdeationTool(self.client_manager).process(text, history)
+
+def main():
+    handler = ToolHandler()
+    
+    # Example of adding a new client and tool
+    """
+    # Register a new client
+    handler.register_new_client(
+        "anthropic",
+        Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    )
+    
+    # Create a new tool that uses the Anthropic client
+    class CustomTool(BaseTool):
+        def process(self, text: str) -> str:
+            client = self.client_manager.get_client("anthropic")
+            # Implementation using Anthropic client
+            pass
+    
+    # Register the new tool
+    handler.register_new_tool(
+        name="custom_tool",
+        description="Description of what the tool does",
+        system_prompt="System prompt for the tool",
+        client_type="anthropic",
+        handler_class=CustomTool
+    )
+    """
+    
+    while True:
+        query = input("\nEnter your query (type 'bye' to end): ")
+        if query.lower() == 'bye':
+            print("\nGoodbye! Have a great day!")
+            break
+            
+        tool, response = handler.tool_selection(query)
+        print(f"Response:")
+        for i in response:
+            print(i, end="")
+        
+        print("\n--------------------------------")
+
+if __name__ == "__main__":
+    main()
