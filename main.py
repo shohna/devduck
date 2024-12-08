@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import re
 
+os.environ['PERPLEXITY_API_KEY'] = "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"
+
 @dataclass
 class Tool:
     name: str
@@ -77,7 +79,7 @@ class BaseTool(ABC):
 class InternetSearchTool(BaseTool):
     def process(self, text: str, history:str) -> str:
         print(f"**Selected tool: internet_search**")
-        print(f"Searching the internet for: {text}")
+        # print(f"Searching the internet for: {text}")
         client = self.client_manager.get_client("perplexity")
         response = client.chat.completions.create(
             model="llama-3.1-sonar-large-128k-online",
@@ -93,8 +95,8 @@ class InternetSearchTool(BaseTool):
 class IdeationTool(BaseTool):
     def process(self, text: str, history:str) -> str:
         print(f"**Selected tool: ideation**")
-        print(f"Processing ideation query: {text}")
-        print(f"history: {history}")
+        # print(f"Processing ideation query: {text}")
+        # print(f"history: {history}")
         client = self.client_manager.get_client("local")
         input_text = f"You are an ideation specialist. Do not immediately provide solutions. Always ask questions to help the user think through their ideas: {text}"
         response = client.chat.completions.create(
@@ -109,8 +111,8 @@ class IdeationTool(BaseTool):
 class TherapistTool(BaseTool):
     def process(self, text: str, history:str) -> str:
         print(f"**Selected tool: therapist**")
-        print(f"Processing therapist query: {text}")
-        print(f"history: {history}")
+        # print(f"Processing therapist query: {text}")
+        # print(f"history: {history}")
         client = self.client_manager.get_client("local")
         input_text = f"Talk to the user about their mental health and provide emotional support: {text}. Here is the conversation history: {history}"
         response = client.chat.completions.create(
@@ -260,27 +262,27 @@ class ToolHandler:
     def tool_selection(self, text: str, session_id) -> Tuple[str, str]:
         """Select and execute the appropriate tool."""
         try:
+            if not self.current_tool :
             # Determine which tool to use
-            local_client = self.client_manager.get_client("local")
-            tool_selection_prompt = f"You are an expert decision maker. I want your help to make a tool choice depending on the tools provided. Tools: {self.registry.get_openai_tools()}. Here is the text that you should use to decide what tool to use: {text}. Return only the tool name. Previously used tool: {self.current_tool}. It might be a follow up question."
-            response = local_client.chat.completions.create(
-                model="llama-3.2-3b-instruct",
-                messages=[{"role": "user", "content": tool_selection_prompt}],
-                tools=self.registry.get_openai_tools(),
-                tool_choice="auto"
-            )
-            
-            # Get selected tool name
-            tool_calls = response.choices[0].message.content
-            selected_tool = tool_calls if tool_calls else "ideation"
-            
-            # Print tool switch notification
-            if self.current_tool and selected_tool != self.current_tool:
-                print(f"\nSwitching from {self.current_tool} to {selected_tool}")
-            self.current_tool = selected_tool
-            
+                local_client = self.client_manager.get_client("local")
+                tool_selection_prompt = f"You are an expert decision maker. I want your help to make a tool choice depending on the tools provided. Tools: {self.registry.get_openai_tools()}. Here is the text that you should use to decide what tool to use: {text}. Return only the tool name. Previously used tool: {self.current_tool}. It might be a follow up question."
+                response = local_client.chat.completions.create(
+                    model="llama-3.2-3b-instruct",
+                    messages=[{"role": "user", "content": tool_selection_prompt}],
+                    tools=self.registry.get_openai_tools(),
+                    tool_choice="auto"
+                )
+                
+                # Get selected tool name
+                tool_calls = response.choices[0].message.content
+                selected_tool = tool_calls if tool_calls else "ideation"
+                
+                # Print tool switch notification
+                # if self.current_tool and selected_tool != self.current_tool:
+                    # print(f"\nSwitching from {self.current_tool} to {selected_tool}")
+                self.current_tool = selected_tool
+                
             messages = self.get_conversation_messages(selected_tool, text, session_id)
-            print(f"Messages ss : {messages}")
             if not messages:
                 messages = [{"role": "system", "content": self.registry.get_system_prompt(selected_tool)}]
                 
@@ -292,10 +294,12 @@ class ToolHandler:
             return selected_tool, result
 
         except Exception as e:
-            print(f"Error in tool_selection: {str(e)}")
+            # print(f"Error in tool_selection: {str(e)}")
             messages = self.get_conversation_messages("ideation", text, session_id)
             return "ideation", IdeationTool(self.client_manager).process(text, messages)
 
+    def reset(self):
+        self.current_tool = None
 def main():
     handler = ToolHandler()
     
