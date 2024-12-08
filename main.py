@@ -94,11 +94,12 @@ class IdeationTool(BaseTool):
     def process(self, text: str, history:str) -> str:
         print(f"**Selected tool: ideation**")
         print(f"Processing ideation query: {text}")
+        print(f"history: {history}")
         client = self.client_manager.get_client("local")
-        input_text = f"You are an ideation specialist. Do not immediately provide solutions. Always ask questions to help the user think through their ideas: {text}. Here is the conversation history: {history}"
+        input_text = f"You are an ideation specialist. Do not immediately provide solutions. Always ask questions to help the user think through their ideas: {text}"
         response = client.chat.completions.create(
             model="llama-3.2-3b-qnn",
-            messages=[{"role": "user", "content": input_text}],
+            messages= history + [{"role": "user", "content": input_text}],
             stream=True
         )
         for chunk in response:
@@ -109,11 +110,12 @@ class TherapistTool(BaseTool):
     def process(self, text: str, history:str) -> str:
         print(f"**Selected tool: therapist**")
         print(f"Processing therapist query: {text}")
+        print(f"history: {history}")
         client = self.client_manager.get_client("local")
         input_text = f"Talk to the user about their mental health and provide emotional support: {text}. Here is the conversation history: {history}"
         response = client.chat.completions.create(
             model="llama-3.2-3b-qnn",
-            messages=[{"role": "user", "content": input_text}],
+            messages= history + [{"role": "user", "content": input_text}],
             stream=True
         )
         for chunk in response:
@@ -153,7 +155,7 @@ class ToolHandler:
         self._register_default_tools()
         
         # Conversation history
-        self.conversation_history = defaultdict(list)
+        self.conversation_history = defaultdict(lambda: defaultdict(list))
         self.current_tool = None
 
     def _register_default_tools(self):
@@ -243,31 +245,27 @@ class ToolHandler:
         tool = Tool(name=name, description=description, system_prompt=system_prompt)
         self.registry.register_tool(tool, handler_class)
 
-    def update_conversation_history(self, tool_name: str, user_message: str, assistant_message: str):
+    def update_conversation_history(self, tool_name: str, user_message: str, assistant_message: str, session_id):
         """Update the conversation history for the specified tool."""
-        self.conversation_history[tool_name].extend([
+        self.conversation_history[session_id][tool_name].extend([
             {"role": "user", "content": user_message},
             {"role": "assistant", "content": assistant_message}
         ])
 
-    def get_conversation_messages(self, tool_name: str, text: str) -> List[Dict[str, str]]:
+    def get_conversation_messages(self, tool_name: str, text: str, session_id) -> List[Dict[str, str]]:
         """Get the full conversation history for a tool."""
-        messages = [
-            {"role": "system", "content": self.registry.get_system_prompt(tool_name)}
-        ]
-        messages.extend(self.conversation_history[tool_name])
-        messages.append({"role": "user", "content": text})
+        messages = self.conversation_history[session_id][tool_name]
         return messages
 
-    def tool_selection(self, text: str, history:str) -> Tuple[str, str]:
+    def tool_selection(self, text: str, session_id) -> Tuple[str, str]:
         """Select and execute the appropriate tool."""
         try:
             # Determine which tool to use
             local_client = self.client_manager.get_client("local")
-            tool_selection_prompt = f"You are an expert decision maker. I want your help to make a tool choice depending on the tools provided. Tools: {self.registry.get_openai_tools()}. Here is the text that you should use to decide what tool to use: {text}. Return only the tool name."
+            tool_selection_prompt = f"You are an expert decision maker. I want your help to make a tool choice depending on the tools provided. Tools: {self.registry.get_openai_tools()}. Here is the text that you should use to decide what tool to use: {text}. Return only the tool name. Previously used tool: {self.current_tool}. It might be a follow up question."
             response = local_client.chat.completions.create(
                 model="llama-3.2-3b-instruct",
-                messages=[{"role": "user", "content": tool_selection_prompt + f", history:{history}"}],
+                messages=[{"role": "user", "content": tool_selection_prompt}],
                 tools=self.registry.get_openai_tools(),
                 tool_choice="auto"
             )
@@ -281,16 +279,22 @@ class ToolHandler:
                 print(f"\nSwitching from {self.current_tool} to {selected_tool}")
             self.current_tool = selected_tool
             
+            messages = self.get_conversation_messages(selected_tool, text, session_id)
+            print(f"Messages ss : {messages}")
+            if not messages:
+                messages = [{"role": "system", "content": self.registry.get_system_prompt(selected_tool)}]
+                
             # Create and execute tool handler
             handler_class = self.registry.tool_handlers[selected_tool]
             handler = handler_class(self.client_manager)
-            result = handler.process(text, history)
+            result = handler.process(text, messages)
             
             return selected_tool, result
 
         except Exception as e:
             print(f"Error in tool_selection: {str(e)}")
-            return "ideation", IdeationTool(self.client_manager).process(text, history)
+            messages = self.get_conversation_messages("ideation", text, session_id)
+            return "ideation", IdeationTool(self.client_manager).process(text, messages)
 
 def main():
     handler = ToolHandler()

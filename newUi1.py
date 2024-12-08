@@ -95,6 +95,9 @@ class VoiceChatApp(ctk.CTk):
             
             # Set the newly created session as current
             self.session_menu.set(session_name)
+            self.chat_display.delete("1.0", ctk.END)
+            welcome_message = f"Welcome to {session_name}!\n"
+            self.chat_display.insert(ctk.END, welcome_message)
         
     def change_session(self, session_name):
         if session_name in self.sessions:
@@ -158,9 +161,7 @@ class VoiceChatApp(ctk.CTk):
         threading.Thread(target=self.stream_response, args=(text,)).start()
 
     def stream_response(self, text):
-        history = "".join(self.sessions[self.session_menu.get()])
-        print(history)
-        tool, response = self.tool_handler.tool_selection(text, history)
+        tool, response = self.tool_handler.tool_selection(text, self.session_menu.get())
         self.chat_display.insert(ctk.END, f"Using {tool} tool:")
         full_response = ""
         for chunk in response:
@@ -168,13 +169,15 @@ class VoiceChatApp(ctk.CTk):
                 full_response += chunk
                 self.chat_display.insert(ctk.END, chunk)
                 self.chat_display.see(ctk.END)
+                
+        self.tool_handler.update_conversation_history(tool, text, full_response, self.session_menu.get())
         
         # Speak the full response
         self.speech_engine.say(full_response)
-        self.speech_engine.runAndWait()
+        # self.speech_engine.runAndWait()
         
         self.chat_display.see(ctk.END)
-        self.sessions[self.session_menu.get()].append((f"prompt:{text}, response:{full_response}"))
+        # self.sessions[self.session_menu.get()].append((f"prompt:{text}, response:{full_response}"))
 
 
 if __name__ == "__main__":
